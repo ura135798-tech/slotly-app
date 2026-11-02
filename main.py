@@ -1,12 +1,16 @@
-
 from fastapi import FastAPI, Request, Form, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import create_engine, Column, Integer, String, ForeignKey
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from datetime import datetime, date, timedelta
 import hashlib
+import os  # ВАЖНО ДЛЯ RENDER
 
-SQLALCHEMY_DATABASE_URL = "sqlite:///./slotly.db"
+# Настройка базы данных. Если на Render задана переменная DATABASE_URL, она будет использована.
+# В противном случае (локально) создастся файл slotly.db в текущей папке.
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./slotly.db")
+SQLALCHEMY_DATABASE_URL = DATABASE_URL
+
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
@@ -39,6 +43,8 @@ class User(Base):
     slug = Column(String, unique=True)
     city = Column(String)
     is_admin = Column(Integer, default=0)
+    is_active = Column(Integer, default=1) # Для блокировки
+    plan = Column(String, default="FREE")  # Для тарифов
     work_start = Column(String, default="10:00")
     work_end = Column(String, default="18:00")
     break_start = Column(String, default="14:00")
@@ -102,7 +108,6 @@ def get_db():
 
 def hash_pass(p): return hashlib.sha256(p.encode()).hexdigest()
 
-# Функция для получения ВСЕХ городов (наш список + добавленные мастерами)
 def get_all_cities(db: Session):
     db_cities = [u.city for u in db.query(User).all() if u.city]
     return sorted(list(set(CITIES + db_cities)))
@@ -112,7 +117,7 @@ def init_admin():
     try:
         admin = db.query(User).filter(User.email == "admin@slotly.ru").first()
         if not admin:
-            new_admin = User(name="Служба Поддержки", email="admin@slotly.ru", password=hash_pass("admin"), slug="admin", city="Москва", is_admin=1)
+            new_admin = User(name="Администратор", email="admin@slotly.ru", password=hash_pass("admin"), slug="admin", city="Москва", is_admin=1)
             db.add(new_admin)
             db.commit()
     finally:
@@ -149,30 +154,14 @@ HTML_HEAD = '''
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
 :root {
-    --bg: #F7F5F0;
-    --surface: #FFFFFF;
-    --text: #1A1A1A;
-    --text-muted: #666666;
-    --border: #E5E0D8;
-    --input-border: #D1CCC2;
-    --btn-bg: #1A1A1A;
-    --btn-text: #FFFFFF;
-    --btn-hover-bg: #FFFFFF;
-    --btn-hover-text: #1A1A1A;
-    --qr-bg: #FFFFFF;
+    --bg: #F7F5F0; --surface: #FFFFFF; --text: #1A1A1A; --text-muted: #666666;
+    --border: #E5E0D8; --input-border: #D1CCC2; --btn-bg: #1A1A1A; --btn-text: #FFFFFF;
+    --btn-hover-bg: #FFFFFF; --btn-hover-text: #1A1A1A; --qr-bg: #FFFFFF;
 }
 [data-theme="dark"] {
-    --bg: #121212;
-    --surface: #1A1A1A;
-    --text: #F7F5F0;
-    --text-muted: #999999;
-    --border: #333333;
-    --input-border: #444444;
-    --btn-bg: #F7F5F0;
-    --btn-text: #1A1A1A;
-    --btn-hover-bg: #1A1A1A;
-    --btn-hover-text: #F7F5F0;
-    --qr-bg: #FFFFFF;
+    --bg: #121212; --surface: #1A1A1A; --text: #F7F5F0; --text-muted: #999999;
+    --border: #333333; --input-border: #444444; --btn-bg: #F7F5F0; --btn-text: #1A1A1A;
+    --btn-hover-bg: #1A1A1A; --btn-hover-text: #F7F5F0; --qr-bg: #FFFFFF;
 }
 body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); padding: 20px; margin: 0; font-weight: 300; transition: background 0.3s, color 0.3s; }
 h1, h2, h3 { font-family: 'Cormorant Garamond', serif; font-weight: 400; margin-top: 0; letter-spacing: 0.02em; }
@@ -200,7 +189,7 @@ a { color: var(--text); text-decoration: underline; text-underline-offset: 4px; 
 .time-slot.active { background: var(--text); color: var(--bg); border-color: var(--text); }
 .time-slot.disabled { opacity: 0.3; cursor: not-allowed; background: var(--bg); text-decoration: line-through; }
 .link-box { background: var(--bg); padding: 20px; border: 1px solid var(--border); margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; transition: background 0.3s; }
-.link-box span { font-family: monospace; font-size: 14px; }
+.link-box span { font-family: monospace; font-size: 14px; word-break: break-all; }
 .qr { background: var(--qr-bg); padding: 10px; border: 1px solid var(--border); display: inline-block; }
 .market-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 30px; max-width: 1100px; margin: 0 auto; }
 .master-card { background: var(--surface); border: 1px solid var(--border); text-align: center; transition: 0.3s; padding: 40px 30px; }
@@ -227,6 +216,26 @@ a { color: var(--text); text-decoration: underline; text-underline-offset: 4px; 
 .table { width: 100%; border-collapse: collapse; margin-top: 20px; }
 .table th, .table td { padding: 16px; text-align: left; border-bottom: 1px solid var(--border); font-size: 14px; color: var(--text); }
 .table th { font-family: 'Cormorant Garamond', serif; font-size: 18px; font-weight: 600; }
+
+/* СТИЛИ ДЛЯ НОВОЙ АДМИНКИ */
+.admin-layout { display: flex; min-height: 100vh; background: #121212; color: #F7F5F0; margin: -20px; }
+.admin-sidebar { width: 260px; background: #1A1A1A; border-right: 1px solid #333; padding: 40px 20px; display: flex; flex-direction: column; }
+.admin-sidebar h2 { color: #F7F5F0; font-family: 'Cormorant Garamond', serif; font-size: 28px; margin-bottom: 40px; letter-spacing: 0.1em; }
+.admin-sidebar a { display: block; color: #999; text-decoration: none; padding: 15px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.1em; border-bottom: 1px solid #2a2a2a; transition: 0.3s; }
+.admin-sidebar a:hover, .admin-sidebar a.active { color: #F7F5F0; background: #2a2a2a; padding-left: 20px; }
+.admin-main { flex: 1; padding: 50px; overflow-y: auto; background: #121212; }
+.admin-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 40px; border-bottom: 1px solid #333; padding-bottom: 20px; }
+.admin-header h1 { font-size: 36px; color: #F7F5F0; margin: 0; }
+.admin-card { background: #1A1A1A; border: 1px solid #333; padding: 30px; margin-bottom: 20px; }
+.admin-card h3 { color: #F7F5F0; font-size: 24px; margin-bottom: 20px; }
+.admin-table { width: 100%; border-collapse: collapse; }
+.admin-table th, .admin-table td { padding: 15px; text-align: left; border-bottom: 1px solid #333; color: #F7F5F0; font-size: 14px; }
+.admin-table th { color: #999; text-transform: uppercase; font-size: 12px; letter-spacing: 0.1em; }
+.badge { padding: 5px 10px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+.badge-free { background: #333; color: #999; }
+.badge-pro { background: #B8860B; color: #fff; }
+.badge-active { background: #178a52; color: #fff; }
+.badge-blocked { background: #cc0000; color: #fff; }
 </style>
 <script>
     (function() {
@@ -266,6 +275,7 @@ def nav_bar(user_name=None, is_admin=False):
 def footer():
     return "<div class='footer'>© 2026 SLOTLY. Искусство управления временем.</div>"
 
+# --- ГЛАВНАЯ ---
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request, city: str = None, db: Session = Depends(get_db)):
     uid = request.cookies.get("uid")
@@ -273,7 +283,7 @@ def index(request: Request, city: str = None, db: Session = Depends(get_db)):
     user_name = current_user.name if current_user else None
     is_admin = current_user.is_admin if current_user else False
 
-    all_masters = db.query(User).filter(User.is_admin == 0).all()
+    all_masters = db.query(User).filter(User.is_admin == 0, User.is_active == 1).all()
     masters = [m for m in all_masters if m.city == city] if city else all_masters
     total_bookings_count = db.query(Booking).count()
 
@@ -297,7 +307,6 @@ def index(request: Request, city: str = None, db: Session = Depends(get_db)):
     if city and not masters:
         masters_html = f"<div style='text-align:center; padding:60px; border:1px solid var(--border); grid-column:1/-1;'><h2 style='font-size:32px;'>В городе {city} пока нет мастеров</h2><p style='color:var(--text-muted);'>Станьте первым, кто присоединится к платформе.</p></div>"
 
-    # Получаем актуальный список городов (включая добавленные мастерами)
     all_cities = get_all_cities(db)
     city_options = "".join([f"<option value='{c}' {'selected' if c == city else ''}>{c}</option>" for c in all_cities])
 
@@ -339,6 +348,125 @@ def index(request: Request, city: str = None, db: Session = Depends(get_db)):
     </div>
     """ + footer() + HTML_TAIL
 
+# --- НОВАЯ АДМИНКА ---
+@app.get("/admin", response_class=HTMLResponse)
+def admin_panel(request: Request, tab: str = "dashboard", db: Session = Depends(get_db)):
+    uid = request.cookies.get("uid")
+    if not uid: return RedirectResponse("/login")
+    u = db.query(User).filter(User.id == int(uid)).first()
+    if not u or not u.is_admin: return RedirectResponse("/app")
+
+    masters = db.query(User).filter(User.is_admin == 0).all()
+    total_bookings = db.query(Booking).count()
+    total_money = sum([b.price for b in db.query(Booking).all()])
+    tickets = db.query(SupportTicket).order_by(SupportTicket.id.desc()).all()
+
+    sidebar = f"""
+    <div class='admin-sidebar'>
+        <h2>SLOTLY ADMIN</h2>
+        <a href='/admin?tab=dashboard' class="{'active' if tab=='dashboard' else ''}">Обзор</a>
+        <a href='/admin?tab=masters' class="{'active' if tab=='masters' else ''}">Мастера</a>
+        <a href='/admin?tab=tickets' class="{'active' if tab=='tickets' else ''}">Обращения ({len([t for t in tickets if t.status=='open'])})</a>
+        <div style='margin-top:auto;'>
+            <a href='/'>← На сайт</a>
+            <a href='/logout' style='color:#cc0000;'>Выйти</a>
+        </div>
+    </div>
+    """
+
+    content = ""
+    if tab == "dashboard":
+        content = f"""
+        <div class='admin-header'><h1>Обзор платформы</h1></div>
+        <div style='display:grid; grid-template-columns: repeat(4, 1fr); gap:20px; margin-bottom:40px;'>
+            <div class='admin-card' style='text-align:center;'><h3 style='font-size:40px; margin:0; color:#F7F5F0;'>{len(masters)}</h3><p style='color:#999; font-size:12px; text-transform:uppercase; letter-spacing:0.1em;'>Мастеров</p></div>
+            <div class='admin-card' style='text-align:center;'><h3 style='font-size:40px; margin:0; color:#F7F5F0;'>{total_bookings}</h3><p style='color:#999; font-size:12px; text-transform:uppercase; letter-spacing:0.1em;'>Записей</p></div>
+            <div class='admin-card' style='text-align:center;'><h3 style='font-size:40px; margin:0; color:#F7F5F0;'>{total_money} ₽</h3><p style='color:#999; font-size:12px; text-transform:uppercase; letter-spacing:0.1em;'>Оборот</p></div>
+            <div class='admin-card' style='text-align:center;'><h3 style='font-size:40px; margin:0; color:#F7F5F0;'>{len([t for t in tickets if t.status=='open'])}</h3><p style='color:#999; font-size:12px; text-transform:uppercase; letter-spacing:0.1em;'>Тикетов</p></div>
+        </div>
+        <div class='admin-card'>
+            <h3>Последние записи на платформе</h3>
+            <table class='admin-table'>
+                <tr><th>Клиент</th><th>Мастер</th><th>Услуга</th><th>Дата</th><th>Сумма</th></tr>
+                {''.join([f"<tr><td>{b.client_name}</td><td>{db.query(User).get(b.user_id).name}</td><td>{b.service_name}</td><td>{b.date} {b.time}</td><td>{b.price} ₽</td></tr>" for b in db.query(Booking).order_by(Booking.id.desc()).limit(10).all()]) or '<tr><td colspan="5">Нет записей</td></tr>'}
+            </table>
+        </div>
+        """
+    elif tab == "masters":
+        masters_html = ""
+        for m in masters:
+            m_bookings = db.query(Booking).filter(Booking.user_id == m.id).count()
+            status_badge = "<span class='badge badge-active'>Активен</span>" if m.is_active else "<span class='badge badge-blocked'>Заблокирован</span>"
+            plan_badge = f"<span class='badge badge-pro'>PRO</span>" if m.plan == "PRO" else "<span class='badge badge-free'>FREE</span>"
+            
+            block_btn = f"<form method='POST' action='/admin/toggle-block/{m.id}' style='display:inline;'><button style='padding:8px 12px; margin:0; font-size:10px; width:auto; background:{'#cc0000' if m.is_active else '#178a52'}; border-color:{'#cc0000' if m.is_active else '#178a52'};'>{'Заблокировать' if m.is_active else 'Разблокировать'}</button></form>"
+            pro_btn = f"<form method='POST' action='/admin/make-pro/{m.id}' style='display:inline;'><button style='padding:8px 12px; margin:0; font-size:10px; width:auto; background:#B8860B; border-color:#B8860B;'>Сделать PRO</button></form>" if m.plan == "FREE" else ""
+
+            masters_html += f"<tr><td><b>{m.name}</b></td><td>{m.city}</td><td>{m.email}</td><td><a href='/m/{m.slug}' target='_blank' style='color:#3b82f6;'>/m/{m.slug}</a></td><td>{plan_badge}</td><td>{m_bookings}</td><td>{status_badge}</td><td style='display:flex; gap:5px;'>{pro_btn} {block_btn}</td></tr>"
+
+        content = f"""
+        <div class='admin-header'><h1>Управление мастерами</h1></div>
+        <div class='admin-card'>
+            <table class='admin-table'>
+                <tr><th>Имя</th><th>Город</th><th>Email</th><th>Ссылка</th><th>Тариф</th><th>Записей</th><th>Статус</th><th>Действия</th></tr>
+                {masters_html or '<tr><td colspan="8">Нет мастеров</td></tr>'}
+            </table>
+        </div>
+        """
+    elif tab == "tickets":
+        tickets_html = ""
+        for t in tickets:
+            status_color = "#178a52" if t.status == "resolved" else "#B8860B"
+            btn = f"<form method='POST' action='/admin/resolve/{t.id}' style='margin-top:10px;'><button class='btn-green' style='padding:8px 15px; margin:0; font-size:10px; width:auto;'>Пометить решённым</button></form>" if t.status == "open" else ""
+            tickets_html += f"""
+            <div class='admin-card' style='border-left: 4px solid {status_color};'>
+                <div style='display:flex; justify-content:space-between; align-items:center;'>
+                    <h3 style='margin:0; font-size:20px;'>{t.sender_name} <span style='font-size:12px; color:#999; font-weight:normal;'>/{t.sender_role}</span></h3>
+                    <span style='color:{status_color}; font-size:12px; letter-spacing:0.1em;'>{t.status.upper()}</span>
+                </div>
+                <p style='color:#999; font-size:12px; margin:5px 0 15px 0;'>{t.created_at}</p>
+                <p style='font-size:15px; margin-bottom:15px;'>{t.message}</p>
+                {btn}
+            </div>
+            """
+        content = f"""
+        <div class='admin-header'><h1>Обращения в поддержку</h1></div>
+        {tickets_html or '<p style="color:#999;">Нет обращений</p>'}
+        """
+
+    return HTML_HEAD + f"""
+    <div class='admin-layout'>
+        {sidebar}
+        <div class='admin-main'>
+            {content}
+        </div>
+    </div>
+    """ + HTML_TAIL
+
+# --- ДЕЙСТВИЯ АДМИНА ---
+@app.post("/admin/toggle-block/{user_id}")
+def admin_toggle_block(user_id: int, db: Session = Depends(get_db)):
+    u = db.query(User).filter(User.id == user_id).first()
+    if u:
+        u.is_active = 0 if u.is_active else 1
+        db.commit()
+    return RedirectResponse("/admin?tab=masters", status_code=303)
+
+@app.post("/admin/make-pro/{user_id}")
+def admin_make_pro(user_id: int, db: Session = Depends(get_db)):
+    u = db.query(User).filter(User.id == user_id).first()
+    if u:
+        u.plan = "PRO"
+        db.commit()
+    return RedirectResponse("/admin?tab=masters", status_code=303)
+
+@app.post("/admin/resolve/{ticket_id}")
+def resolve_ticket(ticket_id: int, db: Session = Depends(get_db)):
+    t = db.query(SupportTicket).filter(SupportTicket.id == ticket_id).first()
+    if t: t.status = "resolved"; db.commit()
+    return RedirectResponse("/admin?tab=tickets", status_code=303)
+
+# --- ОСТАЛЬНЫЕ РОУТЫ ---
 @app.get("/support", response_class=HTMLResponse)
 def support_page(request: Request):
     return HTML_HEAD + nav_bar() + f"""
@@ -365,51 +493,6 @@ def support_submit(sender_name: str = Form(...), sender_role: str = Form(...), m
         <a href='/' style='display:block; margin-top:30px; padding:16px; border:1px solid var(--text); text-decoration:none; text-transform:uppercase; letter-spacing:0.1em; font-size:12px;'>Вернуться</a>
     </div>
     """ + footer() + HTML_TAIL
-
-@app.get("/admin", response_class=HTMLResponse)
-def admin_panel(request: Request, db: Session = Depends(get_db)):
-    uid = request.cookies.get("uid")
-    if not uid: return RedirectResponse("/login")
-    u = db.query(User).filter(User.id == int(uid)).first()
-    if not u or not u.is_admin: return RedirectResponse("/app")
-
-    masters = db.query(User).filter(User.is_admin == 0).all()
-    total_bookings = db.query(Booking).count()
-    total_money = sum([b.price for b in db.query(Booking).all()])
-    tickets = db.query(SupportTicket).order_by(SupportTicket.id.desc()).all()
-
-    masters_html = ""
-    for m in masters:
-        m_bookings = db.query(Booking).filter(Booking.user_id == m.id).count()
-        masters_html += f"<tr><td><b>{m.name}</b></td><td>{m.city}</td><td>{m.email}</td><td><a href='/m/{m.slug}' target='_blank'>/m/{m.slug}</a></td><td>{m_bookings}</td></tr>"
-
-    tickets_html = ""
-    for t in tickets:
-        status_color = "#178a52" if t.status == "resolved" else "#B8860B"
-        btn = f"<form method='POST' action='/admin/resolve/{t.id}'><button class='btn-green' style='padding:10px; margin:0; font-size:10px;'>Решено</button></form>" if t.status == "open" else ""
-        tickets_html += f"""<div class='card'><div style='display:flex; justify-content:space-between; align-items:center;'><b>{t.sender_name}</b> <span style='color:{status_color}; font-size:12px; letter-spacing:0.1em;'>{t.status.upper()}</span></div><p style='color:var(--text-muted); font-size:13px; margin:5px 0;'>{t.sender_role} • {t.created_at}</p><p style='font-size:15px;'>{t.message}</p>{btn}</div>"""
-
-    return HTML_HEAD + nav_bar(u.name, is_admin=True) + f"""
-    <div style='max-width:1100px; margin: 0 auto;'>
-        <h2 style='font-size:40px;'>Панель администратора</h2>
-        <div style='display:grid; grid-template-columns: repeat(4, 1fr); gap:20px; margin-bottom:40px;'>
-            <div class='card' style='text-align:center;'><h3 style='font-size:36px; margin:0;'>{len(masters)}</h3><p style='color:var(--text-muted); font-size:12px; text-transform:uppercase;'>Мастеров</p></div>
-            <div class='card' style='text-align:center;'><h3 style='font-size:36px; margin:0;'>{total_bookings}</h3><p style='color:var(--text-muted); font-size:12px; text-transform:uppercase;'>Записей</p></div>
-            <div class='card' style='text-align:center;'><h3 style='font-size:36px; margin:0;'>{total_money} ₽</h3><p style='color:var(--text-muted); font-size:12px; text-transform:uppercase;'>Оборот</p></div>
-            <div class='card' style='text-align:center;'><h3 style='font-size:36px; margin:0;'>{len([t for t in tickets if t.status=='open'])}</h3><p style='color:var(--text-muted); font-size:12px; text-transform:uppercase;'>Обращений</p></div>
-        </div>
-        <div class='grid' style='grid-template-columns: 2fr 1fr; max-width:100%;'>
-            <div><div class='card'><h3 style='font-size:28px;'>Мастера</h3><table class='table'><tr><th>Имя</th><th>Город</th><th>Email</th><th>Ссылка</th><th>Записей</th></tr>{masters_html or '<tr><td colspan="5">Нет мастеров</td></tr>'}</table></div></div>
-            <div><div class='card'><h3 style='font-size:28px;'>Обращения</h3>{tickets_html or '<p style="color:var(--text-muted)">Нет обращений</p>'}</div></div>
-        </div>
-    </div>
-    """ + footer() + HTML_TAIL
-
-@app.post("/admin/resolve/{ticket_id}")
-def resolve_ticket(ticket_id: int, db: Session = Depends(get_db)):
-    t = db.query(SupportTicket).filter(SupportTicket.id == ticket_id).first()
-    if t: t.status = "resolved"; db.commit()
-    return RedirectResponse("/admin", status_code=303)
 
 @app.get("/my-bookings", response_class=HTMLResponse)
 def client_bookings_get(request: Request):
@@ -443,7 +526,6 @@ def client_cancel(booking_id: int, db: Session = Depends(get_db)):
     if b: db.delete(b); db.commit()
     return RedirectResponse("/my-bookings", status_code=303)
 
-# ИЗМЕНЕНО: Регистрация с поддержкой ручного ввода города
 @app.get("/register", response_class=HTMLResponse)
 def reg_page(db: Session = Depends(get_db)):
     all_cities = get_all_cities(db)
@@ -468,6 +550,7 @@ def login_page():
 def login(email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
     u = db.query(User).filter(User.email == email, User.password == hash_pass(password)).first()
     if not u: return RedirectResponse("/login?error=1", status_code=303)
+    if not u.is_active: return RedirectResponse("/login?error=blocked", status_code=303) # Проверка на блокировку
     resp = RedirectResponse("/admin" if u.is_admin else "/app", status_code=303)
     resp.set_cookie("uid", str(u.id))
     return resp
@@ -518,18 +601,12 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         book_html += f"""<div class='card' style='display:flex; justify-content:space-between; align-items:center; padding:20px;'><div><b style='font-size:18px;'>{b.client_name}</b><br><span style='color:var(--text-muted); font-size:13px;'>{b.client_phone}</span> • <span style='color:var(--text-muted); font-size:12px;'>{b.client_email}</span><br><span style='color:var(--text); font-size:13px;'>{b.service_name} • {d} в {b.time}</span>{comment_html}</div><form method='POST' action='/cancel-booking/{b.id}'><button class='btn-red' style='padding:8px 12px; margin:0; font-size:10px;'>Отменить</button></form></div>"""
 
     wait_html = "".join([f"<div class='card' style='border-left: 3px solid #B8860B; padding:20px;'><b style='font-size:18px;'>{w.client_name}</b> ждет на {w.date}<br><span style='color:var(--text-muted); font-size:13px;'>{w.client_phone}</span></div>" for w in waitlist])
- 
-
-
-    
     reviews_html = "".join([f"<div class='card' style='padding:20px;'><div class='stars'>{'★' * r.rating + '☆' * (5 - r.rating)}</div><b style='font-size:18px;'>{r.client_name}</b><br><span style='color:var(--text-muted); font-size:14px;'>{r.text}</span></div>" for r in reviews]) or "<p style='color:var(--text-muted)'>Пока нет отзывов</p>"
-   base_url = str(request.base_url).rstrip('/')
-   
 
-
-
-full_link = f"{base_url}/m/{u.slug}"
-    full_link = f"http://localhost:8000/m/{u.slug}"
+    # ИСПРАВЛЕНИЕ ССЫЛКИ ДЛЯ RENDER:
+    base_url = str(request.base_url).rstrip('/')
+    full_link = f"{base_url}/m/{u.slug}"
+    
     qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=120x120&data={full_link}"
     link_widget = f"""<div style='margin-top:30px; padding:30px; border:1px solid var(--border);'><h3 style='margin-top:0;'>Ваша персональная ссылка</h3><div class='link-box'><span>{full_link}</span><button onclick="navigator.clipboard.writeText('{full_link}'); alert('Ссылка скопирована!')" style='width:auto; padding:10px 15px; margin:0; font-size:10px;'>Копировать</button></div><div style='display:flex; gap:20px; align-items:center;'><div class='qr'><img src='{qr_url}' width='100' height='100'></div><div><p style='color:var(--text-muted); font-size:13px; margin:0;'>Покажите этот QR-код клиенту для мгновенной записи.</p></div></div><details style='margin-top:20px;'><summary style='cursor:pointer; font-size:13px; text-transform:uppercase; letter-spacing:0.1em;'>Изменить адрес</summary><form method='POST' action='/update-slug' style='margin-top:15px; display:flex; gap:10px;'><input name='new_slug' value='{u.slug}' required pattern='[a-z0-9-]+' style='margin:0;'><button type='submit' style='width:120px; margin:0;'>Сохранить</button></form></details></div>"""
     
@@ -561,7 +638,7 @@ def cancel_booking(booking_id: int, db: Session = Depends(get_db)):
 @app.get("/m/{slug}", response_class=HTMLResponse)
 def public_page(slug: str, date_str: str = None, db: Session = Depends(get_db)):
     u = db.query(User).filter(User.slug == slug).first()
-    if not u: return HTML_HEAD + nav_bar() + "<div class='box'><h2>Мастер не найден</h2><a href='/'>На главную</a></div>" + footer() + HTML_TAIL
+    if not u or not u.is_active: return HTML_HEAD + nav_bar() + "<div class='box'><h2>Мастер не найден или заблокирован</h2><a href='/'>На главную</a></div>" + footer() + HTML_TAIL
     
     services = db.query(Service).filter(Service.user_id == u.id).all()
     reviews = db.query(Review).filter(Review.user_id == u.id).order_by(Review.id.desc()).all()
