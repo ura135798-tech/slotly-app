@@ -1,4 +1,5 @@
-﻿from fastapi import FastAPI, Request, Form, Depends
+
+from fastapi import FastAPI, Request, Form, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import create_engine, Column, Integer, String, ForeignKey
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
@@ -517,8 +518,17 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         book_html += f"""<div class='card' style='display:flex; justify-content:space-between; align-items:center; padding:20px;'><div><b style='font-size:18px;'>{b.client_name}</b><br><span style='color:var(--text-muted); font-size:13px;'>{b.client_phone}</span> • <span style='color:var(--text-muted); font-size:12px;'>{b.client_email}</span><br><span style='color:var(--text); font-size:13px;'>{b.service_name} • {d} в {b.time}</span>{comment_html}</div><form method='POST' action='/cancel-booking/{b.id}'><button class='btn-red' style='padding:8px 12px; margin:0; font-size:10px;'>Отменить</button></form></div>"""
 
     wait_html = "".join([f"<div class='card' style='border-left: 3px solid #B8860B; padding:20px;'><b style='font-size:18px;'>{w.client_name}</b> ждет на {w.date}<br><span style='color:var(--text-muted); font-size:13px;'>{w.client_phone}</span></div>" for w in waitlist])
-    reviews_html = "".join([f"<div class='card' style='padding:20px;'><div class='stars'>{'★' * r.rating + '☆' * (5 - r.rating)}</div><b style='font-size:18px;'>{r.client_name}</b><br><span style='color:var(--text-muted); font-size:14px;'>{r.text}</span></div>" for r in reviews]) or "<p style='color:var(--text-muted)'>Пока нет отзывов</p>"
+ 
 
+
+    
+    reviews_html = "".join([f"<div class='card' style='padding:20px;'><div class='stars'>{'★' * r.rating + '☆' * (5 - r.rating)}</div><b style='font-size:18px;'>{r.client_name}</b><br><span style='color:var(--text-muted); font-size:14px;'>{r.text}</span></div>" for r in reviews]) or "<p style='color:var(--text-muted)'>Пока нет отзывов</p>"
+   base_url = str(request.base_url).rstrip('/')
+   
+
+
+
+full_link = f"{base_url}/m/{u.slug}"
     full_link = f"http://localhost:8000/m/{u.slug}"
     qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=120x120&data={full_link}"
     link_widget = f"""<div style='margin-top:30px; padding:30px; border:1px solid var(--border);'><h3 style='margin-top:0;'>Ваша персональная ссылка</h3><div class='link-box'><span>{full_link}</span><button onclick="navigator.clipboard.writeText('{full_link}'); alert('Ссылка скопирована!')" style='width:auto; padding:10px 15px; margin:0; font-size:10px;'>Копировать</button></div><div style='display:flex; gap:20px; align-items:center;'><div class='qr'><img src='{qr_url}' width='100' height='100'></div><div><p style='color:var(--text-muted); font-size:13px; margin:0;'>Покажите этот QR-код клиенту для мгновенной записи.</p></div></div><details style='margin-top:20px;'><summary style='cursor:pointer; font-size:13px; text-transform:uppercase; letter-spacing:0.1em;'>Изменить адрес</summary><form method='POST' action='/update-slug' style='margin-top:15px; display:flex; gap:10px;'><input name='new_slug' value='{u.slug}' required pattern='[a-z0-9-]+' style='margin:0;'><button type='submit' style='width:120px; margin:0;'>Сохранить</button></form></details></div>"""
